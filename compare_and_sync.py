@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 
 import os
 import shutil
@@ -30,7 +30,8 @@ def update_metadata(src, dst, verbose=False):
 def copy_with_metadata(src, dst, is_dir=False, verbose=False):
     """Copy file or directory and apply source metadata."""
     if is_dir:
-        shutil.copytree(src, dst)
+        #shutil.copytree(src, dst)
+        shutil.copytree(src, dst, dirs_exist_ok=True)
     else:
         shutil.copy2(src, dst)
     update_metadata(src, dst, verbose)
@@ -65,40 +66,60 @@ def select_items_with_curses(choices):
     def menu(stdscr):
         curses.curs_set(0)
         pos = 0
+        top = 0
+
+        all_selected = False
+        full_choices = ["[Select All]"] + choices
 
         while True:
             stdscr.clear()
             height, width = stdscr.getmaxyx()
             max_visible = height - 2
-            if len(choices) > max_visible:
-                stdscr.addstr(0, 0, f"Terminal too small ({height} rows). Resize or reduce files.")
-                stdscr.getch()
-                return []
 
             stdscr.addstr(0, 0, "Select missing items to copy (SPACE to toggle, ENTER to confirm):")
-            for i, choice in enumerate(choices):
-                if i >= max_visible:
-                    break
-                prefix = "[x]" if choice in selected else "[ ]"
-                line = f"> {prefix} {choice}" if i == pos else f"  {prefix} {choice}"
+
+            visible_choices = full_choices[top:top + max_visible]
+
+            for i, choice in enumerate(visible_choices):
+                index = top + i
+                if index == 0:
+                    prefix = "[x]" if all_selected else "[ ]"
+                else:
+                    item = choices[index - 1]
+                    prefix = "[x]" if item in selected else "[ ]"
+
+                line = f"> {prefix} {choice}" if index == pos else f"  {prefix} {choice}"
                 try:
-                    stdscr.addstr(i + 1, 0, line, curses.A_REVERSE if i == pos else 0)
+                    stdscr.addstr(i + 1, 0, line[:width - 1], curses.A_REVERSE if index == pos else 0)
                 except curses.error:
                     pass
+
             key = stdscr.getch()
 
             if key in [curses.KEY_UP, ord('k')]:
-                pos = (pos - 1) % len(choices)
+                pos = (pos - 1) % len(full_choices)
             elif key in [curses.KEY_DOWN, ord('j')]:
-                pos = (pos + 1) % len(choices)
+                pos = (pos + 1) % len(full_choices)
             elif key in [ord(' '), ord('\t')]:
-                choice = choices[pos]
-                if choice in selected:
-                    selected.remove(choice)
+                if pos == 0:
+                    all_selected = not all_selected
+                    selected.clear()
+                    if all_selected:
+                        selected.update(choices)
                 else:
-                    selected.add(choice)
+                    item = choices[pos - 1]
+                    if item in selected:
+                        selected.remove(item)
+                    else:
+                        selected.add(item)
+                    all_selected = len(selected) == len(choices)
             elif key in [curses.KEY_ENTER, ord('\n'), ord('\r')]:
                 break
+
+            if pos < top:
+                top = pos
+            elif pos >= top + max_visible:
+                top = pos - max_visible + 1
 
     curses.wrapper(menu)
     return list(selected)
@@ -131,7 +152,6 @@ def main():
             update_metadata(old_path, new_path, verbose=verbose)
             updated += 1
 
-            # Only diff files inside conf/
             if not is_dir and (rel_path.startswith("conf" + os.sep) or os.sep + "conf" + os.sep in old_path):
                 old_lines = read_file_lines(old_path)
                 new_lines = read_file_lines(new_path)
